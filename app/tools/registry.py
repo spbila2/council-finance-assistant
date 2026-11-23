@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from . import budget, invoices
+
+log = logging.getLogger("app.tools")
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -86,7 +89,10 @@ def execute(name: str, tool_input: dict[str, Any], db: Session, *, user_id: int 
         else:
             result = {"error": f"unknown tool '{name}'"}
     except Exception as exc:  # the loop must survive a bad input; the model sees the error
-        result = {"error": f"{type(exc).__name__}: {exc}"}
+        # The model (and through it the user) sees a plain message; the detail goes to the log only.
+        log.exception("tool %s failed", name)
+        db.rollback()
+        result = {"error": "the tool could not run with this input; check the arguments and try again"}
     text = json.dumps(result, ensure_ascii=False, default=str)
     if len(text) > MAX_RESULT_CHARS:
         text = text[:MAX_RESULT_CHARS] + '... (truncated)"}'

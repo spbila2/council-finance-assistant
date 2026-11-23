@@ -1,0 +1,44 @@
+# בדיקת אבטחה לפי OWASP Top 10 (2025) — עוזר הכספים של המועצה
+
+**מה נבדק:** הפרויקט `council-finance-assistant` (שרת FastAPI, ממשק סטטי, מסד נתונים, קריאות למודל Claude, CI).
+**איך:** קריאת כל קוד השרת והממשק, `pip-audit` על `requirements.txt`, בדיקות הרצה על האפליקציה (ניחוש סיסמאות, כותרות, גוף בקשה גדול, קובץ שאינו תמונה), ובדיקה בדפדפן אחרי התיקון.
+**רשימת הייחוס:** https://top10.owasp.org/2025/
+**תאריך:** 23.11.2026 · ענף `19-owasp-hardening` · הבדיקות החדשות: `tests/test_security.py`
+
+## סיכום
+
+נמצאו 10 ממצאים: 3 בחומרה גבוהה, 3 בינונית ו-4 נמוכה. כולם תוקנו, ולכל אחד יש בדיקה אוטומטית. בקרת הגישה (A01) הייתה תקינה ולא נדרש בה תיקון. לא נמצאו פגיעויות ידועות בספריות.
+
+## הממצאים והתיקונים
+
+| # | OWASP | חומרה | מה נמצא | איך תוקן | בדיקה |
+|---|---|---|---|---|---|
+| 1 | A05 Injection (XSS) | גבוהה | תשובת המודל עברה דרך `marked` ישירות ל-`innerHTML`. הוראה שמוסתרת בתמונת חשבונית יכולה לגרום למודל להחזיר HTML או סקריפט שירוצו בדפדפן של העובד. | אחרי `marked` התוצאה עוברת `DOMPurify`, עם רשימת תגיות ותכונות אסורות (`img`, `script`, `form`, `style` ועוד). כשאחת הספריות חסרה מוצג טקסט רגיל בלבד. נבדק בדפדפן: `<img onerror>` ו-`<script>` הוסרו, קישור `javascript:` נוטרל, ושום קוד לא רץ. | `test_the_ui_cleans_the_model_reply_before_it_becomes_html` |
+| 2 | A07 Authentication | גבוהה | אין הגבלה על ניסיונות כניסה: 60 סיסמאות שגויות ברצף קיבלו 401. הסיסמה אחת לכל הצוות, ולכן ניחוש הוא האיום המרכזי. | אחרי 8 כישלונות מאותה כתובת ב-15 דקות מתקבל 429, גם עם סיסמה נכונה. כתובת הלקוח נלקחת מהערך האחרון ב-`X-Forwarded-For` (זה שה-proxy של Railway הוסיף), כך שאי אפשר לעקוף את המגבלה בכותרת מזויפת. כניסה מוצלחת מאפסת את המונה. | `test_repeated_wrong_passwords_…`, `test_a_forged_forwarded_for_header_…`, `test_a_successful_login_…` |
+| 3 | A07 / A02 | גבוהה | כשלא הוגדר `APP_ENV=production`, הסיסמה הייתה `council` והמפתח החותם נוצר אקראי בכל הפעלה. פריסה שגרתית ב-Railway בלי המשתנה הזה נשארה פתוחה. | כל סביבה שאינה `local` מסרבת לעלות בלי `APP_PASSWORD`, `APP_SECRET` (לפחות 32 תווים) ומפתח API, ובלי סיסמת ברירת מחדל. פריסה ב-Railway בלי `APP_ENV` נחשבת `production`. | `test_production_refuses_…`, `test_a_railway_deploy_without_app_env_…` |
+| 4 | A02 Misconfiguration | בינונית | אין כותרות אבטחה. `/health` חשף בלי התחברות את שם המודל, סוג המסד והסביבה. | `SecurityMiddleware` מוסיף לכל תגובה: `Content-Security-Policy`, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, ו-HSTS מחוץ ל-local. `/health` מחזיר רק `{"status":"ok"}`, והפרטים נרשמים ביומן. | `test_security_headers_…`, `test_health_is_public_…` |
+| 5 | A06 Insecure Design | בינונית | שדה התמונה בלי הגבלת אורך: גוף של 30MB נקרא במלואו לפני שנדחה. קובץ שאינו תמונה, שסומן `image/png`, התקבל. | דחייה לפי `Content-Length` לפני קריאת הגוף, מגבלת אורך בסכמה, ובדיקת base64 ו-magic bytes שתואמים לסוג שהוצהר. | `test_a_body_larger_…`, `test_image_field_…`, `test_bytes_that_are_not_…`, `test_a_real_png_…` |
+| 6 | A03 Supply Chain | בינונית | סקריפט `marked` נטען מ-CDN בלי `integrity`. `pytest` הותקן גם בפרודקשן. אין בדיקת פגיעויות ב-CI. | `marked` ו-`DOMPurify` בגרסאות מדויקות עם SRI (sha384) ו-`crossorigin`. קובץ `requirements-dev.txt` חדש (`pytest`, `pip-audit`), ו-CI מריץ `pip-audit` בכל PR. | `test_scripts_from_the_cdn_are_pinned_…` |
+| 7 | A04 Cryptographic Failures | נמוכה | `CRON_SECRET` הושווה עם `!=` (זמן השוואה משתנה). קוקי הסשן קיבל `secure` רק ב-`production`. | `hmac.compare_digest`. הקוקי `secure` בכל סביבה שאינה `local`. | `test_cron_secret_is_checked_…`, `test_session_cookie_is_secure_…` |
+| 8 | A10 Exceptional Conditions | נמוכה | טקסט שגיאה גולמי מ-API של המודל הוצג למשתמש, ושמות חריגות ופרטים פנימיים הוחזרו מתוך הכלים. | הודעה כללית למשתמש ולמודל. הפירוט נרשם ביומן (`log.exception`) וב-`runs.error`, וגם מתבצע `rollback` אחרי כישלון בכלי. | `test_a_failing_tool_does_not_leak_…` |
+| 9 | A09 Logging | נמוכה | כניסות כושלות וניסיונות שגויים להפעיל את הסיכום לא נרשמו, ולכן אי אפשר היה לזהות ניסיון ניחוש. | אזהרה ביומן עם הכתובת והשם (לא הסיסמה) בכל כניסה כושלת, ובכל סירוב ב-`/internal/digest`. | `test_a_failed_login_is_logged_…` |
+| 10 | A08 Integrity | נמוכה | `source_ref` מגיע מהמודל. אפשר היה לרשום חשבונית חיה בשם `history-...`, ואז היא מוסתרת מסיכום הבוקר. | `log_invoice` מקבל רק הפניות שמתחילות ב-`img_` (אלה שהאפליקציה יוצרת בעצמה). | `test_the_model_cannot_file_an_invoice_under_a_history_reference` |
+
+## מה נבדק ונמצא תקין
+
+- **A01 Broken Access Control:** בכל נקודת קצה של שיחות נבדקת בעלות (`conv.user_id != user.id` מחזיר 404). הכלים של המודל מוגבלים: `budget_query` לקריאה בלבד ללא SQL חופשי, ו-`log_invoice` רק מוסיף שורות. אין נקודת קצה שמקבלת כתובת מהמשתמש, ולכן אין SSRF.
+- **Injection במסד הנתונים:** כל השאילתות עוברות דרך SQLAlchemy עם פרמטרים.
+- **סודות:** `git grep sk-ant` ריק (חוץ מהטקסט ב-`practice.md`), `.env` לא במעקב ולא היה בהיסטוריה.
+- **ספריות:** `pip-audit -r requirements.txt` — No known vulnerabilities found.
+
+## סיכונים שנשארו, ומודעים להם
+
+- **זהות לפי שם מוקלד:** מי שיודע את סיסמת הצוות יכול להקליד שם של עובד אחר ולראות את שיחותיו. זו החלטה מתועדת ב-`architecture.md` (עשרה משתמשים, בלי חשבונות). יעבור לחשבונות אישיים אם יתווספו לקוח נוסף או דרישת הרשאות.
+- **מונה הכניסות בזיכרון:** מתאפס בהפעלה מחדש ולא משותף בין עותקים. מתאים לעותק אחד של השירות (כך מוגדר ב-`railway.ts`).
+- **גוף בקשה בשיטת chunked:** בדיקת `Content-Length` לא תופסת בקשה בלי כותרת זו. מגבלת האורך בסכמה עדיין חוסמת אותה אחרי הקריאה.
+- **הסשן חסר-מצב:** יציאה מוחקת את הקוקי בדפדפן אבל לא מבטלת אותו בשרת. התוקף לא יכול לזייף אותו, אבל אם נגנב הוא תקף עד 72 שעות. פתרון: רשימת ביטול או `APP_SECRET` חדש.
+- **פרומפט אינג'קשן:** לא ניתן למנוע מהמודל לקרוא הוראות שבתמונה. ההגנה היא שהכללים נאכפים בכלי ולא בפרומפט (כפילות, סכום לא קריא, ספק לא מוכר, חריגה), והממשק מנקה את הפלט.
+
+## פעולות בפריסה
+
+ב-Railway צריכים להיות מוגדרים `APP_PASSWORD` (לא `council` או `change-me`), `APP_SECRET` (לפחות 32 תווים) ו-`CRON_SECRET`. בלעדיהם השירות יסרב לעלות, וזה מכוון.

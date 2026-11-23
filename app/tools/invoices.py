@@ -86,6 +86,11 @@ def log_invoice(db: Session, *, supplier: str | None, invoice_number: str | None
     supplier_text = (supplier or "").strip()
     invoice_number = (invoice_number or "").strip() or None
     source_ref = (source_ref or "").strip() or None
+    if source_ref and not source_ref.startswith("img_"):
+        # source_ref comes from the model; only the image references the app itself creates are accepted.
+        # "history-..." rows are the seeded demo data and are left out of the digest, so a model (or an
+        # instruction hidden in a photo) must not be able to file a live invoice under that name.
+        source_ref = None
     amount_value = parse_amount(amount)
     when = _parse_date(invoice_date)
 

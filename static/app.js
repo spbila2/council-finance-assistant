@@ -22,8 +22,13 @@
     }
     return res.status === 204 ? null : res.json();
   }
+  // The model's reply is untrusted text (an instruction hidden in an invoice photo can steer it), so the Markdown
+  // is turned into HTML and then cleaned before it reaches innerHTML. If either library is missing: plain escaped text.
+  const PURIFY = { FORBID_TAGS: ["style", "img", "form", "input", "button", "iframe", "object", "embed", "svg", "math"], FORBID_ATTR: ["style"] };
   function render(md) {
-    if (window.marked) { try { return marked.parse(md, { breaks: true }); } catch (_) {} }
+    if (window.marked && window.DOMPurify) {
+      try { return DOMPurify.sanitize(marked.parse(md, { breaks: true }), PURIFY); } catch (_) {}
+    }
     const div = document.createElement("div"); div.textContent = md; return div.innerHTML.replace(/\n/g, "<br>");
   }
   function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }

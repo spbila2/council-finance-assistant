@@ -6,7 +6,9 @@ loop itself lives in agent.py; this file is doors, locks and plumbing.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import logging
 import os
 import queue
 import threading
@@ -37,6 +39,8 @@ async def lifespan(app: FastAPI):
     yield
 
 
+log = logging.getLogger("app.security")
+
 HEARTBEAT_SECONDS = 8  # how long a chat stream may stay silent before a keep-alive line goes out
 
 
@@ -50,6 +54,54 @@ class RevalidatedStatic(StaticFiles):
         response = await super().get_response(path, scope)
         response.headers["Cache-Control"] = "no-cache"
         return response
+
+
+# Content-Security-Policy: our own files, plus the two pinned scripts from cdnjs (each also carries an integrity
+# hash in index.html). Nothing inline, no framing, no form posts elsewhere.
+CSP = ("default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; style-src 'self'; "
+       "img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; "
+       "form-action 'self'; frame-ancestors 'none'")
+MAX_BODY_BYTES = (settings.max_upload_mb + 2) * 1024 * 1024  # an image plus its base64 overhead and some text
+
+
+class SecurityMiddleware:
+    """Pure ASGI (so streaming replies are untouched): security headers on every response, and a request whose
+    declared body is larger than any legitimate one is refused before it is read."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = dict(scope["headers"]).get(b"content-length", b"0")
+        if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+            return await Response(status_code=413, content="Request too large")(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                extra = {"content-security-policy": CSP, "x-content-type-options": "nosniff",
+                         "x-frame-options": "DENY", "referrer-policy": "no-referrer",
+                         "permissions-policy": "camera=(self), microphone=(), geolocation=()"}
+                if not settings.is_local:
+                    extra["strict-transport-security"] = "max-age=31536000; includeSubDomains"
+                headers.extend((k.encode(), v.encode()) for k, v in extra.items())
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(SecurityMiddleware)
+
+
+def client_address(request: Request) -> str:
+    """The caller's address. Behind Railway's proxy the last X-Forwarded-For entry is the one the proxy added;
+    earlier entries are whatever the caller wrote, so they are never trusted."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()[:64]
+    return request.client.host if request.client else "unknown"
 
 
 app.mount("/static", RevalidatedStatic(directory=str(ROOT / "static")), name="static")
@@ -66,7 +118,7 @@ class LoginIn(BaseModel):
 
 class ImageIn(BaseModel):
     media_type: str = Field(pattern=r"^image/(png|jpeg|webp|gif)$")
-    data: str  # base64, no data: prefix
+    data: str = Field(max_length=limits.max_b64_chars())  # base64, no data: prefix; bounded before it is parsed
 
 
 class ChatIn(BaseModel):
@@ -98,7 +150,8 @@ def index():
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
-    """Railway's health check. 200 only when the database answers and a model is configured."""
+    """Railway's health check. 200 only when the database answers and a model is configured. Public, so it says
+    nothing about the model, the database or the environment."""
     problems = []
     try:
         db.execute(text("SELECT 1"))
@@ -106,12 +159,10 @@ def health(db: Session = Depends(get_db)):
         problems.append(f"db: {type(exc).__name__}")
     if settings.model_provider == "anthropic" and not settings.anthropic_api_key:
         problems.append("ANTHROPIC_API_KEY missing")
-    body = {"status": "ok" if not problems else "degraded", "env": settings.environment, "model": settings.model,
-            "provider": settings.model_provider, "db": "sqlite" if settings.is_sqlite else "postgres", "problems": problems,
-            "time": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     if problems:
-        raise HTTPException(503, body)
-    return body
+        log.error("health check failed: %s", problems)  # the detail stays in the logs, not on the public page
+        raise HTTPException(503, {"status": "degraded"})
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +170,17 @@ def health(db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/login")
-def login(payload: LoginIn, response: Response, db: Session = Depends(get_db)):
+def login(payload: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    address = client_address(request)
+    limits.check_login_allowed(address)
     if not auth.password_ok(payload.password):
+        limits.record_login_failure(address)
+        log.warning("failed login from %s as %r", address, payload.name[:40])
         raise HTTPException(401, "הסיסמה שגויה.")
+    limits.clear_login_failures(address)
     user = auth.get_or_create_user(db, auth.normalise_name(payload.name))
     response.set_cookie(auth.COOKIE_NAME, auth.make_token(user.id, user.name), httponly=True, samesite="lax",
-                        secure=settings.is_production, max_age=settings.session_hours * 3600, path="/")
+                        secure=not settings.is_local, max_age=settings.session_hours * 3600, path="/")
     return {"id": user.id, "name": user.name}
 
 
@@ -172,6 +228,8 @@ def chat(payload: ChatIn, request: Request, db: Session = Depends(get_db)):
     limits.check_rate_limit(db, user.id)
     limits.check_daily_cap(db)
     limits.check_upload_size(payload.image.data if payload.image else None)
+    if payload.image:
+        limits.check_image(payload.image.media_type, payload.image.data)
 
     conv = None
     if payload.conversation_id is not None:
@@ -251,7 +309,8 @@ def stats(request: Request, db: Session = Depends(get_db)):
 @app.post("/internal/digest")
 def digest(db: Session = Depends(get_db), x_cron_secret: str | None = Header(default=None)):
     """Manual or cron trigger for the morning digest. Protected by CRON_SECRET."""
-    if not settings.cron_secret or x_cron_secret != settings.cron_secret:
+    if not settings.cron_secret or not hmac.compare_digest((x_cron_secret or "").encode(), settings.cron_secret.encode()):
+        log.warning("digest trigger refused: bad or missing X-Cron-Secret")
         raise HTTPException(401, "Bad or missing X-Cron-Secret.")
     body = build_digest(db)
     sent = send_digest(body)
