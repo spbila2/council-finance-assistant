@@ -27,10 +27,12 @@ Format: **title** · label · done when.
 
 - Calibrating the made-up history: the line "הדפסת כתובות ושונות" shows 239% of its budget, and the owner chose to leave it.
 - Removing the test invoices from the live database: they are made up, so they stay.
+- Security review (docs/security-review.md): the two libraries stay on the CDN with SRI instead of being self-hosted, and chunked requests without a Content-Length are not blocked in code (the schema's length limit still applies). Both judged not worth the extra files and code for the demo.
 
 ## Later (not scheduled)
 
 - Alembic migrations once production data exists.
+- Per-user accounts and server-side session revocation, before real use (docs/security-review.md): a per-user `session_version` in the token, so logout cancels a copied cookie. A schema change, so Alembic comes first. Issues are disabled on the repository, so it is tracked here.
 - Conversation purge at 90 days.
 - A month-by-month budget, so "remaining this month" has an answer.
 - A real approval step for flagged invoices, done by a person in the app.
