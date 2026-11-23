@@ -95,6 +95,16 @@ class SecurityMiddleware:
 app.add_middleware(SecurityMiddleware)
 
 
+_PROXY_HEADERS = ("x-real-ip", "x-forwarded-for", "forwarded", "x-envoy-external-address", "true-client-ip",
+                  "cf-connecting-ip", "x-forwarded-proto")
+
+
+def _proxy_headers(request: Request) -> dict[str, str]:
+    """The headers that can carry the caller's address, for the log only (never cookies or other headers).
+    Used to find out which one Railway fills with the real client address."""
+    return {h: request.headers[h][:120] for h in _PROXY_HEADERS if h in request.headers}
+
+
 def client_address(request: Request) -> str:
     """The caller's address. Behind Railway's proxy the last X-Forwarded-For entry is the one the proxy added;
     earlier entries are whatever the caller wrote, so they are never trusted."""
@@ -175,7 +185,7 @@ def login(payload: LoginIn, request: Request, response: Response, db: Session = 
     limits.check_login_allowed(address, payload.name)
     if not auth.password_ok(payload.password):
         limits.record_login_failure(address, payload.name)
-        log.warning("failed login from %s as %r", address, payload.name[:40])
+        log.warning("failed login from %s as %r; proxy headers %s", address, payload.name[:40], _proxy_headers(request))
         raise HTTPException(401, "הסיסמה שגויה.")
     limits.clear_login_failures(address, payload.name)
     user = auth.get_or_create_user(db, auth.normalise_name(payload.name))
