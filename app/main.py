@@ -106,11 +106,13 @@ def _proxy_headers(request: Request) -> dict[str, str]:
 
 
 def client_address(request: Request) -> str:
-    """The caller's address. Behind Railway's proxy the last X-Forwarded-For entry is the one the proxy added;
-    earlier entries are whatever the caller wrote, so they are never trusted."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()[:64]
+    """The caller's address, for the login throttle. Behind Railway's proxy it is X-Real-IP: the edge replaces
+    that header (and X-Forwarded-For) with the address it saw, so a caller cannot forge it, and it is the same on
+    every request. The last X-Forwarded-For entry is not usable: it is one of several edge proxies. Outside a
+    deploy (local, tests) nothing in front sets the header, so it is ignored and the socket address is used."""
+    real = request.headers.get("x-real-ip", "").strip()
+    if real and not settings.is_local:
+        return real[:64]
     return request.client.host if request.client else "unknown"
 
 

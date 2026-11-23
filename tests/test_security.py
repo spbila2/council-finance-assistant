@@ -50,11 +50,27 @@ def test_a_successful_login_resets_the_counter(client):
 
 
 def test_a_forged_forwarded_for_header_does_not_dodge_the_throttle(client):
-    # The caller controls everything but the last entry (the one Railway's proxy appends).
+    # Locally nothing in front of the app sets these headers, so a caller's values are ignored.
     for i in range(limits.LOGIN_MAX_FAILURES):
-        client.post("/api/login", json={"name": "Eve", "password": "x"}, headers={"X-Forwarded-For": f"1.1.1.{i}, 9.9.9.9"})
-    r = client.post("/api/login", json={"name": "Eve", "password": "x"}, headers={"X-Forwarded-For": "2.2.2.2, 9.9.9.9"})
+        client.post("/api/login", json={"name": "Eve", "password": "x"},
+                    headers={"X-Forwarded-For": f"1.1.1.{i}", "X-Real-IP": f"2.2.2.{i}"})
+    r = client.post("/api/login", json={"name": "Eve", "password": "x"}, headers={"X-Real-IP": "3.3.3.3"})
     assert r.status_code == 429
+
+
+def test_behind_the_railway_proxy_the_real_ip_is_the_client_not_the_edge(client, monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main, "settings", replace(main.settings, environment="production"))
+    # The edge node differs from request to request; the client address does not.
+    for i in range(limits.LOGIN_MAX_FAILURES):
+        client.post("/api/login", json={"name": "Eve", "password": "x"},
+                    headers={"X-Real-IP": "46.0.0.1", "X-Forwarded-For": f"46.0.0.1, 152.233.13.{i}"})
+    r = client.post("/api/login", json={"name": "Eve", "password": "x"},
+                    headers={"X-Real-IP": "46.0.0.1", "X-Forwarded-For": "46.0.0.1, 152.233.12.99"})
+    assert r.status_code == 429
+    other = client.post("/api/login", json={"name": "Eve", "password": "x"}, headers={"X-Real-IP": "46.0.0.2"})
+    assert other.status_code == 401  # a different client address is counted on its own
 
 
 # A02 Security misconfiguration ------------------------------------------------------------------------
