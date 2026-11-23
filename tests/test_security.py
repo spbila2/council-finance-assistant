@@ -28,11 +28,25 @@ def test_repeated_wrong_passwords_are_throttled_and_a_good_one_is_blocked_too(cl
     assert client.post("/api/login", json={"name": "Eve", "password": "test-pass"}).status_code == 429
 
 
+def test_a_colleague_with_a_typo_does_not_lock_the_rest_of_the_office(client):
+    for _ in range(limits.LOGIN_MAX_FAILURES):
+        client.post("/api/login", json={"name": "Dana", "password": "typo"})
+    assert client.post("/api/login", json={"name": "Dana", "password": "test-pass"}).status_code == 429
+    assert client.post("/api/login", json={"name": "Yossi", "password": "test-pass"}).status_code == 200
+
+
+def test_changing_the_name_does_not_dodge_the_address_ceiling(client):
+    codes = [client.post("/api/login", json={"name": f"Name{i}", "password": "x"}).status_code
+             for i in range(limits.LOGIN_MAX_FAILURES_ADDRESS + 3)]
+    assert codes[-1] == 429 and 401 in codes
+    assert client.post("/api/login", json={"name": "Dana", "password": "test-pass"}).status_code == 429
+
+
 def test_a_successful_login_resets_the_counter(client):
     for _ in range(3):
         client.post("/api/login", json={"name": "Dana", "password": "bad"})
     assert client.post("/api/login", json={"name": "Dana", "password": "test-pass"}).status_code == 200
-    assert limits._login_failures == {}
+    assert not any(k.endswith("|dana") for k in limits._login_failures)
 
 
 def test_a_forged_forwarded_for_header_does_not_dodge_the_throttle(client):

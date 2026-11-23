@@ -172,12 +172,12 @@ def health(db: Session = Depends(get_db)):
 @app.post("/api/login")
 def login(payload: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)):
     address = client_address(request)
-    limits.check_login_allowed(address)
+    limits.check_login_allowed(address, payload.name)
     if not auth.password_ok(payload.password):
-        limits.record_login_failure(address)
+        limits.record_login_failure(address, payload.name)
         log.warning("failed login from %s as %r", address, payload.name[:40])
         raise HTTPException(401, "הסיסמה שגויה.")
-    limits.clear_login_failures(address)
+    limits.clear_login_failures(address, payload.name)
     user = auth.get_or_create_user(db, auth.normalise_name(payload.name))
     response.set_cookie(auth.COOKIE_NAME, auth.make_token(user.id, user.name), httponly=True, samesite="lax",
                         secure=not settings.is_local, max_age=settings.session_hours * 3600, path="/")

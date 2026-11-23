@@ -80,38 +80,49 @@ def check_image(media_type: str, data_b64: str) -> None:
         raise HTTPException(400, "הקובץ אינו תמונה מהסוג שהוצהר. אפשר לצרף PNG, JPG, WEBP או GIF.")
 
 
-# ---- login throttle: failed password attempts per client address, kept in memory --------------------------
-# One web replica (.railway/railway.ts), so a dict is enough; a restart clears it, which only helps an attacker
-# once per deploy. The shared password makes guessing the one thing worth defending.
-LOGIN_MAX_FAILURES = 8
+# ---- login throttle: failed password attempts, kept in memory -------------------------------------------
+# Two counters. One per (address, name): a colleague who mistypes locks only their own name, not the office.
+# One per address, looser: because the password is shared, an attacker could otherwise try 8 guesses per made-up
+# name and never be stopped. One web replica (.railway/railway.ts), so a dict is enough; a restart clears it.
+LOGIN_MAX_FAILURES = 8            # per address + name
+LOGIN_MAX_FAILURES_ADDRESS = 40   # per address, whatever the names
 LOGIN_WINDOW_SECONDS = 15 * 60
 _login_failures: dict[str, list[float]] = {}
 
 
-def _recent_failures(client: str, now: float) -> list[float]:
-    recent = [t for t in _login_failures.get(client, []) if now - t < LOGIN_WINDOW_SECONDS]
+def _keys(address: str, name: str) -> tuple[str, str]:
+    return f"{address}|{' '.join((name or '').split()).lower()[:40]}", address
+
+
+def _recent_failures(key: str, now: float) -> list[float]:
+    recent = [t for t in _login_failures.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
     if recent:
-        _login_failures[client] = recent
+        _login_failures[key] = recent
     else:
-        _login_failures.pop(client, None)
+        _login_failures.pop(key, None)
     return recent
 
 
-def check_login_allowed(client: str) -> None:
-    if len(_recent_failures(client, time.monotonic())) >= LOGIN_MAX_FAILURES:
+def check_login_allowed(address: str, name: str) -> None:
+    pair, addr = _keys(address, name)
+    now = time.monotonic()
+    if (len(_recent_failures(pair, now)) >= LOGIN_MAX_FAILURES
+            or len(_recent_failures(addr, now)) >= LOGIN_MAX_FAILURES_ADDRESS):
         raise HTTPException(429, "יותר מדי ניסיונות כניסה שגויים. אפשר לנסות שוב בעוד כרבע שעה.")
 
 
-def record_login_failure(client: str) -> None:
+def record_login_failure(address: str, name: str) -> None:
     now = time.monotonic()
-    _recent_failures(client, now)
-    _login_failures.setdefault(client, []).append(now)
+    for key in _keys(address, name):
+        _recent_failures(key, now)
+        _login_failures.setdefault(key, []).append(now)
     if len(_login_failures) > 5000:  # a flood of addresses must not grow memory without bound
         _login_failures.pop(next(iter(_login_failures)))
 
 
-def clear_login_failures(client: str | None = None) -> None:
-    if client is None:
+def clear_login_failures(address: str | None = None, name: str = "") -> None:
+    """After a good login, forget that name's failures (the address-wide count simply ages out)."""
+    if address is None:
         _login_failures.clear()
     else:
-        _login_failures.pop(client, None)
+        _login_failures.pop(_keys(address, name)[0], None)
