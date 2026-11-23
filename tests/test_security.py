@@ -181,3 +181,11 @@ def test_the_model_cannot_file_an_invoice_under_a_history_reference(db):
     assert row["source_ref"] is None
     db.query(Invoice).filter_by(invoice_number="SEC-1").delete()
     db.commit()
+
+
+def test_the_failed_login_log_shows_the_proxy_headers_but_not_cookies(client, caplog):
+    client.cookies.clear()
+    with caplog.at_level("WARNING", logger="app.security"):
+        client.post("/api/login", json={"name": "Mallory", "password": "bad"},
+                    headers={"X-Real-IP": "203.0.113.7", "X-Forwarded-For": "203.0.113.7, 10.0.0.1", "Cookie": "bc_session=SECRET"})
+    assert "203.0.113.7" in caplog.text and "x-real-ip" in caplog.text and "SECRET" not in caplog.text
