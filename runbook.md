@@ -41,6 +41,16 @@ Written while everything works. Each entry is a sequence: click here, run this, 
 2. If the database URL is wrong, `/health` returns 503 with `db:` in `problems`. Check the `DATABASE_URL` reference variable.
 3. Rollback to the previous deploy if users are waiting; fix in a PR.
 
+## A merge did not deploy (no new deployment in Railway)
+
+Seen on 2026-11-23: three merged PRs produced no deployment. The web service's Settings → Source Repo showed "Could not load branches": Railway had lost its access to the repository through the GitHub app.
+
+1. Railway → `web` → Deployments: is there a deployment for the merge commit? The `digest` service deploys from the same repo, so check it too (it once kept running an old commit).
+2. Settings → Source Repo: press **Retry** next to the red error. If it stays, open https://github.com/settings/installations → Railway → Configure, choose "Only select repositories", make sure `council-finance-assistant` is listed (add it, or Unsuspend the app), save.
+3. Do not press Disconnect: it drops the branch trigger and has to be set up again.
+4. Meanwhile, `railway up --service web` from a clean copy of `main` (`git archive HEAD`) deploys the merged code by hand. Do the same for `digest`.
+5. Check: `curl <url>/health` is 200, and the next merge produces a deployment on its own.
+
 ## Who to call
 
 - You (the implementer), then the finance manager (owner, decides on cost and data).
