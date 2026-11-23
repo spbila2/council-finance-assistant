@@ -13,7 +13,7 @@ macOS and Linux:
 ```bash
 cp .env.example .env         # set APP_PASSWORD, APP_SECRET, ANTHROPIC_API_KEY
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # the app's packages plus pytest and pip-audit
 uvicorn app.main:app --reload
 ```
 
@@ -23,7 +23,7 @@ Windows, in PowerShell 7 with Python 3.12 (`winget install Python.Python.3.12`):
 Copy-Item .env.example .env  # set APP_PASSWORD, APP_SECRET, ANTHROPIC_API_KEY
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # the app's packages plus pytest and pip-audit
 uvicorn app.main:app --reload
 ```
 

@@ -86,20 +86,29 @@ class Settings:
     def is_production(self) -> bool:
         return self.environment == "production"
 
+    @property
+    def is_local(self) -> bool:
+        return self.environment == "local"
+
 
 def load_settings() -> Settings:
     provider = _env("MODEL_PROVIDER", "anthropic")
     api_key = _env("ANTHROPIC_API_KEY")
-    environment = _env("APP_ENV", "local")
+    # A deploy on Railway that forgot APP_ENV is treated as production, never as "local": the local
+    # conveniences (a default password, a random signing key) must not be reachable from the internet.
+    on_railway = bool(os.environ.get("RAILWAY_PROJECT_ID") or os.environ.get("RAILWAY_ENVIRONMENT_NAME"))
+    environment = _env("APP_ENV", "production" if on_railway else "local")
     app_password = _env("APP_PASSWORD")
     app_secret = _env("APP_SECRET")
 
-    if environment == "production":
+    if environment != "local":  # staging and production both fail closed
         missing = [n for n, v in (("APP_PASSWORD", app_password), ("APP_SECRET", app_secret)) if not v]
         if provider == "anthropic" and not api_key:
             missing.append("ANTHROPIC_API_KEY")
         if missing:
-            raise RuntimeError(f"Missing required variables in production: {', '.join(missing)}")
+            raise RuntimeError(f"Missing required variables outside local: {', '.join(missing)}")
+        if app_password in ("council", "change-me") or len(app_secret) < 32:
+            raise RuntimeError("APP_PASSWORD is a known default, or APP_SECRET is shorter than 32 characters")
 
     database_url = _env("DATABASE_URL", "sqlite:///./local.db")
     # Railway's Postgres plugin hands out postgresql:// URLs; SQLAlchemy needs the driver name.

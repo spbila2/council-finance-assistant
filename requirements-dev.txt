@@ -1,0 +1,4 @@
+# Tests and security checks. Not installed on Railway (it builds from requirements.txt only).
+-r requirements.txt
+pytest==9.1.1
+pip-audit==2.10.1

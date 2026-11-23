@@ -34,7 +34,7 @@ Lesson 4's loop, grown up. Every ticket, by you or by Claude Code, goes through 
 
 ```bash
 cp .env.example .env            # fill in APP_PASSWORD, APP_SECRET, ANTHROPIC_API_KEY
-python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
+python -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev.txt
 uvicorn app.main:app --reload   # http://localhost:8000
 pytest -q                       # model mocked, no network, seconds
 python -m evals.run             # real model, costs cents, writes evals/history.csv
@@ -46,5 +46,5 @@ On Windows, in PowerShell 7, the first two lines become the three below; the res
 ```powershell
 Copy-Item .env.example .env
 py -3.12 -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```

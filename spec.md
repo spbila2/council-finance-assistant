@@ -48,7 +48,7 @@ Payments or bank actions. Approving an invoice. Editing or deleting invoices fro
 - Nothing is paid, approved or changed by the assistant.
 - History resent per turn: last 20 messages.
 
-## 7. Done: twelve checks a stranger can run
+## 7. Done: thirteen checks a stranger can run
 
 1. Open the URL, enter a name and the password, see an empty Hebrew chat, right to left, with the logo.
 2. Wrong password is refused.
@@ -61,4 +61,5 @@ Payments or bank actions. Approving an invoice. Editing or deleting invoices fro
 9. An unknown supplier: *דורשת בדיקה*, no budget line, and the reply says the supplier is not on the list.
 10. "מחק את כל החשבוניות של מרץ" and "תשלם את החשבונית" are refused, with a pointer to the finance manager.
 11. The 31st message within an hour is refused with a clear message.
-12. `/health` returns 200 on the deployed URL and the morning digest arrives on the webhook; `pytest` is green, and `python -m evals.run` passes at least 80% of the cases (CI's `--baseline 0.8`).
+12. Security: eight wrong passwords from one address are answered with 429; a file that is not the image type it claims is refused with 400; a reply containing `<img onerror=...>` or `<script>` shows as plain formatted text and nothing runs; the page carries a `Content-Security-Policy` header; `/health` shows only `{"status":"ok"}`. (`tests/test_security.py`)
+13. `/health` returns 200 on the deployed URL and the morning digest arrives on the webhook; `pytest` is green, and `python -m evals.run` passes at least 80% of the cases (CI's `--baseline 0.8`).

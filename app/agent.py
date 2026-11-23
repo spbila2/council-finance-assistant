@@ -206,7 +206,7 @@ def _friendly(exc: Exception) -> str:
         if isinstance(exc, anthropic.APIConnectionError):
             return "לא הצלחתי להגיע למודל. אפשר לבדוק את החיבור ולנסות שוב."
         if isinstance(exc, anthropic.BadRequestError):
-            return f"הבקשה נדחתה: {exc.message if hasattr(exc, 'message') else exc}"
+            return "הבקשה נדחתה. אפשר לנסח אותה מחדש, או לצרף תמונה אחרת."  # the API's own text stays in runs.error
     return "משהו השתבש אצלנו. השגיאה נרשמה, ואפשר לנסות שוב."
 
 

@@ -51,6 +51,8 @@ Postgres on Railway (`DATABASE_URL` from the plugin); SQLite locally and in test
 | Us → model | SDK retries with backoff on 429/529 (2 retries) | Anthropic SDK client |
 | Us → wallet | $3.00 per local day across the app | `app/limits.py` from the `runs` table |
 | Tool loop | max 6 model rounds per turn; tool results truncated at 12,000 chars | `app/agent.py` |
+| Login | 8 wrong passwords per address + name, and 40 per address, per 15 minutes, then 429 (in memory; one web replica) | `app/limits.py`, `/api/login` |
+| Request body | refused with 413 above (max upload + 2) MB by `Content-Length`; the image field is also length-bounded and its bytes must match the declared type | `SecurityMiddleware`, `ImageIn`, `limits.check_image` |
 
 ## Hosting
 
@@ -58,7 +60,7 @@ One Railway project, three things in it: the **web service**, built by Railway's
 
 ## Secrets
 
-`ANTHROPIC_API_KEY`, `APP_PASSWORD`, `APP_SECRET`, `DATABASE_URL`, `CRON_SECRET`, `DIGEST_WEBHOOK_URL`. Locally in `.env` (gitignored); on Railway in the service's Variables tab, shared with the cron service through a reference variable. `.env.example` lists the names with no values. The grep test in practice.md must come back empty on every commit.
+`ANTHROPIC_API_KEY`, `APP_PASSWORD`, `APP_SECRET`, `DATABASE_URL`, `CRON_SECRET`, `DIGEST_WEBHOOK_URL`. Locally in `.env` (gitignored); on Railway in the service's Variables tab, shared with the cron service through a reference variable. `.env.example` lists the names with no values. The grep test in practice.md must come back empty on every commit. Outside `APP_ENV=local` (a Railway deploy without `APP_ENV` counts as production) the app refuses to start without `APP_PASSWORD`, `APP_SECRET` (32+ characters) and the API key, and refuses the known default passwords.
 
 ## Observability
 
@@ -88,3 +90,4 @@ One Railway project, three things in it: the **web service**, built by Railway's
 | 2026-11-09 | The ₪5,000 flag is replaced by a per-supplier range (typical ± the line's allowed deviation) and an over-budget check | One fixed threshold means nothing across suppliers whose invoices run from ₪2,000 to ₪200,000 | The ranges produce too many false flags in the first week → widen the deviation in `budget_lines.csv` |
 | 2026-11-09 | The repository stays public while the budget file is real but cleared as non-confidential by its owner, and every invoice is made up | A public repo is what the course asks for; real supplier invoices or payroll would change that | Any real invoice, employee or supplier contract data is added → make the repository private first |
 | 2026-11-10 | The digest is emailed Sunday to Thursday through a Make scenario (webhook to "send an email to a team member"); Sunday's covers Thursday to Saturday | The finance team works Sunday to Thursday, and a plain yesterday-only digest would skip Thursday and Friday; Make needs no mail password in this repository | A second recipient or a different channel is needed → change the Make scenario, not the code |
+| 2026-11-23 | OWASP Top 10 (2025) review: model replies are sanitised (DOMPurify) before `innerHTML`; CSP and security headers on every response; the two CDN scripts are pinned with SRI; logins are throttled per address; the app fails closed outside `local`; `/health` is minimal; the model's `source_ref` must start with `img_`; test and audit tools moved to `requirements-dev.txt`, `pip-audit` runs in CI. Details: docs/security-review.md | The reply of the model is untrusted text (an instruction hidden in an invoice photo can steer it), the password is shared by everyone, and the page was open to framing and to anything the CDN served | The app leaves the generic demo stage and real data goes in (the shared password and typed names then become per-user accounts), or several replicas → move the login counter to Postgres or Redis and add per-user lockout; scripts self-hosted → drop the CDN from the CSP |
