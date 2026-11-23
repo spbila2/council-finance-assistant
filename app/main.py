@@ -64,9 +64,16 @@ CSP = ("default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; styl
 MAX_BODY_BYTES = (settings.max_upload_mb + 2) * 1024 * 1024  # an image plus its base64 overhead and some text
 
 
+class BodyTooLarge(BaseException):
+    """A BaseException on purpose: FastAPI turns any Exception raised while it reads the body into a 400,
+    and this one has to reach SecurityMiddleware, which answers 413."""
+
+
 class SecurityMiddleware:
-    """Pure ASGI (so streaming replies are untouched): security headers on every response, and a request whose
-    declared body is larger than any legitimate one is refused before it is read."""
+    """Pure ASGI (so streaming replies are untouched): security headers on every response, and a request body
+    larger than any legitimate one is refused with 413. The declared Content-Length is checked first; a body sent
+    in chunks (no Content-Length) is counted as it arrives and cut off at the same limit, before the app keeps it
+    all in memory."""
 
     def __init__(self, app):
         self.app = app
@@ -78,8 +85,22 @@ class SecurityMiddleware:
         if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
             return await Response(status_code=413, content="Request too large")(scope, receive, send)
 
+        received = 0
+        started = False
+
+        async def counting_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_BODY_BYTES:
+                    raise BodyTooLarge
+            return message
+
         async def send_with_headers(message):
+            nonlocal started
             if message["type"] == "http.response.start":
+                started = True
                 headers = message.setdefault("headers", [])
                 extra = {"content-security-policy": CSP, "x-content-type-options": "nosniff",
                          "x-frame-options": "DENY", "referrer-policy": "no-referrer",
@@ -89,7 +110,12 @@ class SecurityMiddleware:
                 headers.extend((k.encode(), v.encode()) for k, v in extra.items())
             await send(message)
 
-        await self.app(scope, receive, send_with_headers)
+        try:
+            await self.app(scope, counting_receive, send_with_headers)
+        except BodyTooLarge:
+            if started:  # a reply is already on its way: nothing sensible left to send
+                raise
+            await Response(status_code=413, content="Request too large")(scope, receive, send_with_headers)
 
 
 app.add_middleware(SecurityMiddleware)

@@ -27,7 +27,7 @@ Format: **title** · label · done when.
 
 - Calibrating the made-up history: the line "הדפסת כתובות ושונות" shows 239% of its budget, and the owner chose to leave it.
 - Removing the test invoices from the live database: they are made up, so they stay.
-- Security review (docs/security-review.md): the two libraries stay on the CDN with SRI instead of being self-hosted, and chunked requests without a Content-Length are not blocked in code (the schema's length limit still applies). Both judged not worth the extra files and code for the demo.
+- Security review (docs/security-review.md): the two libraries stay on the CDN with SRI instead of being self-hosted, judged not worth the extra files. (Chunked bodies without a Content-Length were first left too, then fixed in PR 24: the body is read into memory before the login check.)
 
 ## Later (not scheduled)
 
