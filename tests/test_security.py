@@ -136,6 +136,27 @@ def test_a_body_larger_than_any_valid_request_is_refused_before_it_is_read(clien
     assert r.status_code == 413
 
 
+def test_a_chunked_body_without_content_length_is_cut_off_at_the_limit(client, logged_in):
+    from app import main
+
+    def chunks():  # a generator body is sent chunked, with no Content-Length header
+        for _ in range(main.MAX_BODY_BYTES // (1024 * 1024) + 3):
+            yield b"x" * (1024 * 1024)
+
+    r = client.post("/api/chat", content=chunks(), headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+    assert "content-security-policy" in r.headers  # the refusal carries the security headers too
+
+
+def test_a_normal_chunked_request_still_works(client, logged_in, fake):
+    def chunks():
+        yield b'{"message": "hel'
+        yield b'lo"}'
+
+    r = client.post("/api/chat", content=chunks(), headers={"Content-Type": "application/json"})
+    assert r.status_code == 200
+
+
 def test_image_field_is_length_bounded_by_the_schema(client, logged_in):
     huge = "A" * (limits.max_b64_chars() + 1)
     r = client.post("/api/chat", json={"message": "hi", "image": {"media_type": "image/png", "data": huge}})

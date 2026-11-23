@@ -52,7 +52,7 @@ Postgres on Railway (`DATABASE_URL` from the plugin); SQLite locally and in test
 | Us → wallet | $3.00 per local day across the app | `app/limits.py` from the `runs` table |
 | Tool loop | max 6 model rounds per turn; tool results truncated at 12,000 chars | `app/agent.py` |
 | Login | 8 wrong passwords per address + name, and 40 per address, per 15 minutes, then 429 (in memory; one web replica) | `app/limits.py`, `/api/login` |
-| Request body | refused with 413 above (max upload + 2) MB by `Content-Length`; the image field is also length-bounded and its bytes must match the declared type | `SecurityMiddleware`, `ImageIn`, `limits.check_image` |
+| Request body | refused with 413 above (max upload + 2) MB, by `Content-Length` or, for a chunked body, counted as it arrives; the image field is also length-bounded and its bytes must match the declared type | `SecurityMiddleware`, `ImageIn`, `limits.check_image` |
 
 ## Hosting
 
